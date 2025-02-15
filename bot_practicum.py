@@ -1,81 +1,79 @@
-
-import logging
+import telebot
+import sqlite3
 import os
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
-from telegram.ext import ContextTypes  # Aquí está la corrección
 
-# Configuración básica del logging para ver errores
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
-logger = logging.getLogger(__name__)
+# El token se obtiene de la variable de entorno 'TOKEN'
+TOKEN = os.environ.get('TOKEN')
+if not TOKEN:
+    print("ERROR: No se encontró el TOKEN. Asegúrate de establecer la variable de entorno 'TOKEN'.")
+    exit(1)
 
-# Definir los estados de la conversación
-QUESTION_1, QUESTION_2, QUESTION_3, QUESTION_4, QUESTION_5 = range(5)
+bot = telebot.TeleBot(TOKEN)
+DB_FILE = "chatbot.db"
 
-# Lista para guardar respuestas
-answers = []
+def init_db():
+    """
+    Crea la base de datos y la tabla 'faq' si no existen,
+    e inserta datos iniciales extraídos de la guía didáctica de Practicum.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS faq (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pregunta TEXT,
+            respuesta TEXT
+        )
+    """)
+    # Insertar datos iniciales solo si la tabla está vacía
+    cursor.execute("SELECT COUNT(*) FROM faq")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        faq_entries = [
+            ("¿Qué es Practicum?", 
+             "Practicum es una asignatura orientada al desarrollo de prácticas preprofesionales, donde el estudiante aplica conocimientos y desarrolla competencias en entornos organizacionales."),
+            ("¿Cuántas horas dura Practicum?", 
+             "Las prácticas preprofesionales de la UTPL tienen una duración de 192 horas."),
+            ("¿Cuáles son las competencias generales de Practicum?", 
+             "Entre las competencias se encuentran el trabajo en equipo, la aplicación de buenas prácticas en TI y la capacidad de gestionar proyectos en entornos reales."),
+            ("¿Qué metodologías se utilizan en Practicum?", 
+             "Se utilizan metodologías basadas en proyectos y técnicas de levantamiento de información como encuestas, entrevistas, simulación y análisis de datos."),
+            ("¿Cuál es el rol de los tutores en Practicum?", 
+             "Existen dos roles: el tutor académico, que guía y acompaña al estudiante, y el tutor externo, que valida el cumplimiento de las actividades en la empresa.")
+        ]
+        cursor.executemany("INSERT INTO faq (pregunta, respuesta) VALUES (?, ?)", faq_entries)
+    conn.commit()
+    conn.close()
 
-# Función que se llama cuando el usuario inicia el bot
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  # Cambié CallbackContext por ContextTypes
-    await update.message.reply_text(
-        "¡Hola! Este chatbot recopilará tu experiencia en Practicum 1. \n\n"
-        "Primera pregunta: ¿Cómo describirías tu experiencia general en la materia?"
+def buscar_respuesta(mensaje):
+    """
+    Busca en la base de datos una respuesta cuyo campo 'pregunta' coincida con el texto ingresado.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT respuesta FROM faq WHERE LOWER(pregunta) LIKE ?", ('%' + mensaje.lower() + '%',))
+    resultado = cursor.fetchone()
+    conn.close()
+    return resultado[0] if resultado else "Lo siento, no tengo información sobre ese tema. Intenta formular tu pregunta de otra forma o consulta la documentación disponible."
+
+# Inicializar la base de datos al arrancar el bot
+init_db()
+
+@bot.message_handler(commands=["start", "help"])
+def enviar_saludo(message):
+    saludo = (
+        "¡Hola! Soy tu asistente de Practicum.\n"
+        "Puedes preguntarme cualquier duda relacionada con Practicum I y II, "
+        "como información sobre metodologías, competencias, tutores, postulación y más.\n"
+        "¿En qué puedo ayudarte hoy?"
     )
-    return QUESTION_1
+    bot.reply_to(message, saludo)
 
-# Funciones para cada pregunta
-async def question_1(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answers.append(update.message.text)
-    await update.message.reply_text("¿Qué actividades realizaste durante Practicum 1?")
-    return QUESTION_2
-
-async def question_2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answers.append(update.message.text)
-    await update.message.reply_text("¿Cómo crees que estas actividades contribuyen a tu formación profesional?")
-    return QUESTION_3
-
-async def question_3(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answers.append(update.message.text)
-    await update.message.reply_text("¿Qué desafíos enfrentaste durante Practicum 1?")
-    return QUESTION_4
-
-async def question_4(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answers.append(update.message.text)
-    await update.message.reply_text("¿Cómo planeas aplicar lo aprendido en Practicum 1 en tu futuro profesional?")
-    return QUESTION_5
-
-async def question_5(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    answers.append(update.message.text)
-    await update.message.reply_text("Gracias por compartir tu experiencia en Practicum 1. ¡Hasta luego!")
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Conversación cancelada.")
-    return ConversationHandler.END
-
-def main():
-    # Reemplaza 'YOUR_BOT_API_KEY' con el token de tu bot de Telegram
-    TOKEN = os.getenv("TOKEN")
-    application = Application.builder().token(TOKEN).build()
-
-    # Configuración del flujo de preguntas
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            QUESTION_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, question_1)],
-            QUESTION_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, question_2)],
-            QUESTION_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, question_3)],
-            QUESTION_4: [MessageHandler(filters.TEXT & ~filters.COMMAND, question_4)],
-            QUESTION_5: [MessageHandler(filters.TEXT & ~filters.COMMAND, question_5)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    application.add_handler(conv_handler)
-
-    # Iniciar el bot
-    application.run_polling()
+@bot.message_handler(func=lambda message: True)
+def responder_duda(message):
+    respuesta = buscar_respuesta(message.text)
+    bot.reply_to(message, respuesta)
 
 if __name__ == "__main__":
-    main()
+    print("Bot en ejecución...")
+    bot.infinity_polling()
